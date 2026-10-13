@@ -1,53 +1,53 @@
-from fastapi import APIRouter,Depends,HTTPException
-from pydantic import BaseModel,Field
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from typing import Annotated,Optional
-from datetime import datetime,timedelta,timezone
-from database import SessionLocal,engine
-from models import Users,Books,Reservations,IssueRecords
+from typing import Annotated, Optional
+from datetime import datetime, timedelta, timezone
+from database import SessionLocal, engine
+from models import Users, Books, Reservations, IssueRecords
 from fastapi.responses import JSONResponse
 from passlib.context import CryptContext
-from fastapi.security import OAuth2PasswordRequestForm,OAuth2PasswordBearer
-from router.auth import get_current_user,get_db
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from router.auth import get_current_user, get_db
 
 class CreateBooks(BaseModel):
-    title:str
-    author:str
-    category:str
-    description:str = Field(default="",max_length=200)
-    price:float = Field(default=0.0,gt=0) 
-    total_copies:int = Field(default=1) 
+    title: str
+    author: str
+    category: str
+    description: str = Field(default="", max_length=200)
+    price: float = Field(default=0.0, gt=0) 
+    total_copies: int = Field(default=1) 
 
 class BookUpdate(BaseModel):
-    title:Optional[str] = Field(default=None)
-    author:Optional[str] = Field(default=None)
-    category:Optional[str] = Field(default=None)
-    description:Optional[str] = Field(default=None)
-    price:Optional[float] =Field(default=None)
-    total_copies:Optional[int] = Field(default=None)
-    available_copies:Optional[int] = Field(default=None)
+    title: Optional[str] = Field(default=None)
+    author: Optional[str] = Field(default=None)
+    category: Optional[str] = Field(default=None)
+    description: Optional[str] = Field(default=None)
+    price: Optional[float] = Field(default=None)
+    total_copies: Optional[int] = Field(default=None)
+    available_copies: Optional[int] = Field(default=None)
 
 class IssueBook(BaseModel):
-     book_id:int
-     user_id:int
+     book_id: int
+     user_id: int
 
 router = APIRouter()
 
-db_dependency = Annotated[Session,Depends(get_db)]
-user_dependency = Annotated[dict,Depends(get_current_user)]
-FINE_AMOUNT =20
+db_dependency = Annotated[Session, Depends(get_db)]
+user_dependency = Annotated[dict, Depends(get_current_user)]
+FINE_AMOUNT = 20
 
-def fine_calculate(return_date:datetime,due_date:datetime):
+def fine_calculate(return_date: datetime, due_date: datetime):
     overdue_days = (return_date.date() - due_date.date()).days
-    if overdue_days>0:
-        return round(overdue_days*FINE_AMOUNT,2)
+    if overdue_days > 0:
+        return round(overdue_days * FINE_AMOUNT, 2)
     else:
         return 0.0
 
 @router.post("/admin/createbook")
-def create_book(user:user_dependency,db:db_dependency,newbook:CreateBooks):
-    if user is None or user.get('role') !='admin':
-        raise HTTPException(status_code=401,detail='You are not eligible for adding books')
+def create_book(user: user_dependency, db: db_dependency, newbook: CreateBooks):
+    if user is None or user.get('role') != 'admin':
+        raise HTTPException(status_code=401, detail='You are not eligible for adding books')
     newmodel = Books(
         **newbook.model_dump(),
         available_copies=newbook.total_copies
@@ -55,40 +55,39 @@ def create_book(user:user_dependency,db:db_dependency,newbook:CreateBooks):
     db.add(newmodel)
     db.commit()
 
-    return JSONResponse(status_code=201,content={'message':'Book added succssfull'})
+    return JSONResponse(status_code=201, content={'message': 'Book added successful'})
 
 @router.put("/admin/updatebook/{book_id}")
-def update_book(user:user_dependency,db:db_dependency,updatebook:BookUpdate,book_id:int):
-    if user is None or user.get('role') !='admin':
-        raise HTTPException(status_code=401,detail='You are not eligible for adding books')
+def update_book(user: user_dependency, db: db_dependency, updatebook: BookUpdate, book_id: int):
+    if user is None or user.get('role') != 'admin':
+        raise HTTPException(status_code=401, detail='You are not eligible for updating books')
     
     book = db.query(Books).filter(Books.id == book_id).first()
     if book is None:
-        raise HTTPException(status_code=404,detail="Book Not Found")
+        raise HTTPException(status_code=404, detail="Book Not Found")
 
     updatedata = updatebook.model_dump(exclude_unset=True)
-    for key,value in updatedata.items():
-        setattr(book,key,value)
+    for key, value in updatedata.items():
+        setattr(book, key, value)
     
     db.commit()
 
-    return JSONResponse(status_code=201,content={'message':'Book Updated succssfull'})
+    return JSONResponse(status_code=200, content={'message': 'Book Updated successful'})
 
 
 @router.delete("/admin/deletebook/{book_id}")
-def update_book(user:user_dependency,db:db_dependency,book_id:int):
-    if user is None or user.get('role') !='admin':
-        raise HTTPException(status_code=401,detail='You are not eligible for adding books')
+def delete_book(user: user_dependency, db: db_dependency, book_id: int):
+    if user is None or user.get('role') != 'admin':
+        raise HTTPException(status_code=401, detail='You are not eligible for deleting books')
     
     book = db.query(Books).filter(Books.id == book_id).first()
     if book is None:
-        raise HTTPException(status_code=404,detail="Book Not Found")
+        raise HTTPException(status_code=404, detail="Book Not Found")
 
     db.query(Books).filter(Books.id == book_id).delete()
-    
     db.commit()
 
-    return JSONResponse(status_code=201,content={'message':'Book Deelted succssfull'})
+    return JSONResponse(status_code=200, content={'message': 'Book Deleted successful'})
 
 
 @router.post('/admin/create_issue')
@@ -125,7 +124,6 @@ def issue_book(user: user_dependency, db: db_dependency, newIssue: IssueBook):
     if existing_issue:
         raise HTTPException(status_code=400, detail='User already has this book')
 
-    # If someone else has a pending reservation, block
     other_reservation = db.query(Reservations).filter(
         Reservations.book_id == newIssue.book_id,
         Reservations.status == 'pending',
@@ -166,42 +164,40 @@ def issue_book(user: user_dependency, db: db_dependency, newIssue: IssueBook):
 
     
 @router.put('/admin/return_book/{issue_id}')
-def return_book(user:user_dependency,db:db_dependency,issue_id:int):
+def return_book(user: user_dependency, db: db_dependency, issue_id: int):
+    if user is None or user.get('role') != 'admin':
+        raise HTTPException(status_code=401, detail='Unauthenticated')
 
-    if user is None or user.get('role') !='admin':
-        raise HTTPException(status_code=401,detail='Unauthenticated')
-
-    issue = db.query(IssueRecords).filter(IssueRecords.id ==issue_id).first()
+    issue = db.query(IssueRecords).filter(IssueRecords.id == issue_id).first()
     if issue is None:
-        raise HTTPException(status_code=401,detail="Issue record Not found")
+        raise HTTPException(status_code=404, detail="Issue record Not found")
     
-    
-    issue.return_date = datetime.now
+    current_time = datetime.now(timezone.utc)
+    issue.return_date = current_time
     issue.status = 'returned'
-    issue.fine_amount = fine_calculate(issue.due_date,datetime.now)
+    
+    fine = fine_calculate(current_time, issue.due_date)
+    issue.fine_amount = fine
 
     book = db.query(Books).filter(issue.book_id == Books.id).first()
     if book is not None:
-        book.available_copies +=1
+        book.available_copies += 1
 
     db.commit()
 
-    return JSONResponse(status_code=200,content={'message':'Book Retur success','Fine Amount':fine_calculate(issue.due_date,datetime.now)})
+    return JSONResponse(status_code=200, content={'message': 'Book Return success', 'Fine Amount': fine})
 
 
 @router.put('/admin/fine/paid/{issue_id}')
-def fine_paid(user:user_dependency,db:db_dependency,issue_id:int):
+def fine_paid(user: user_dependency, db: db_dependency, issue_id: int):
+    if user is None or user.get('role') != 'admin':
+        raise HTTPException(status_code=401, detail='Unauthenticated')
 
-    if user is None or user.get('role') !='admin':
-        raise HTTPException(status_code=401,detail='Unauthenticated')
-
-    issue = db.query(IssueRecords).filter(IssueRecords.id ==issue_id).first()
+    issue = db.query(IssueRecords).filter(IssueRecords.id == issue_id).first()
     if issue is None:
-        raise HTTPException(status_code=401,detail="Issue record Not found")
+        raise HTTPException(status_code=404, detail="Issue record Not found")
     
     issue.fine_paid = True
-
     db.commit()
 
-    return JSONResponse(status_code=200,content={'message':'Fine Paid Successfull'})
-
+    return JSONResponse(status_code=200, content={'message': 'Fine Paid Successfully'})
