@@ -6,7 +6,6 @@ from datetime import datetime, timedelta, timezone
 from database import SessionLocal, engine
 from models import Users, Books, Reservations, IssueRecords
 from fastapi.responses import JSONResponse
-from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from router.auth import get_current_user, get_db
 
