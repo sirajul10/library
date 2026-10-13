@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Annotated, Optional
@@ -6,16 +6,11 @@ from datetime import timedelta, datetime, timezone
 from database import SessionLocal, engine
 from models import Users
 from fastapi.responses import JSONResponse
-from passlib.context import CryptContext
+import bcrypt
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from jose import JWTError, jwt
 
 router = APIRouter()
-
-bcrypt_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto"
-)
 
 OAuth2_bearer = OAuth2PasswordBearer(tokenUrl="login")
 
@@ -41,6 +36,15 @@ class UpdateUser(BaseModel):
 class Uppass(BaseModel):
     current_password: str
     new_password: str
+
+
+# Helper functions for native bcrypt password handling
+def hash_password(password: str) -> str:
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
 def create_access_token(
@@ -100,14 +104,13 @@ def get_current_user(
 
 def get_db():
     db = SessionLocal()
-
     try:
         yield db
     finally:
         db.close()
 
 
-def authinticateUser(username, password, db):
+def authenticate_user(username, password, db):
     user = db.query(Users).filter(
         Users.username == username
     ).first()
@@ -115,7 +118,7 @@ def authinticateUser(username, password, db):
     if user is None:
         return False
 
-    if bcrypt_context.verify(password, user.hash_password):
+    if verify_password(password, user.hash_password):
         return user
 
     return False
@@ -135,7 +138,7 @@ def create_users(
         username=new_user.username,
         firstname=new_user.firstname,
         lastname=new_user.lastname,
-        hash_password=bcrypt_context.hash(new_user.password),
+        hash_password=hash_password(new_user.password),
         is_active=True,
         role=new_user.role
     )
@@ -154,7 +157,7 @@ def login(
     db: db_dependency,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
 ):
-    user = authinticateUser(
+    user = authenticate_user(
         form_data.username,
         form_data.password,
         db
@@ -163,7 +166,7 @@ def login(
     if not user:
         raise HTTPException(
             status_code=401,
-            detail="User Not Found"
+            detail="Invalid username or password"
         )
 
     token = create_access_token(
@@ -179,26 +182,25 @@ def login(
     }
 
 @router.get("/user")
-def getuser(user:user_dependency,db:db_dependency):
+def getuser(user: user_dependency, db: db_dependency):
     if user is None:
-        raise HTTPException(status_code=401,detail="User Not Found")
+        raise HTTPException(status_code=401, detail="User Not Found")
     current_user = db.query(Users).filter(Users.id == user.get('id')).first()
     if current_user is None:
-        raise HTTPException(status_code=401,detail="User is not authenticate")
+        raise HTTPException(status_code=401, detail="User is not authenticate")
 
     return {
-       'id':current_user.id,
-       'email':current_user.email,
-       'username':current_user.username,
-       'firstname':current_user.firstname,
-       'lastname':current_user.lastname,
-       'role' : current_user.role,
-       'is_active':current_user.is_active
-
+       'id': current_user.id,
+       'email': current_user.email,
+       'username': current_user.username,
+       'firstname': current_user.firstname,
+       'lastname': current_user.lastname,
+       'role': current_user.role,
+       'is_active': current_user.is_active
     }
 
 @router.put("/updateuser")
-def Update_User(
+def update_user(
     user: user_dependency,
     db: db_dependency,
     update_user: UpdateUser
@@ -248,20 +250,13 @@ def update_password(
             detail="User not found"
         )
 
-    # THIS WAS THE INDENTATION ERROR
-    if not bcrypt_context.verify(
-        update_password.current_password,
-        db_user.hash_password
-    ):
+    if not verify_password(update_password.current_password, db_user.hash_password):
         raise HTTPException(
             status_code=401,
             detail="Wrong Password"
         )
 
-    db_user.hash_password = bcrypt_context.hash(
-        update_password.new_password
-    )
-
+    db_user.hash_password = hash_password(update_password.new_password)
     db.commit()
 
     return JSONResponse(
